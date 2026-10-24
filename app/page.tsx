@@ -939,8 +939,87 @@ function PracticeState({
           </p>
         )}
       </div>
+      <TopicList problems={problems} currentIndex={index} onSelect={goTo} />
       <VoiceChat subject={subject} context={`The student is practicing this problem: ${problem.question}`} />
     </section>
+  )
+}
+
+function TopicList({
+  problems,
+  currentIndex,
+  onSelect,
+}: {
+  problems: Exercise[]
+  currentIndex: number
+  onSelect: (index: number) => void
+}) {
+  const [openTopics, setOpenTopics] = useState<Record<string, boolean>>({})
+  const topics = new Map<string, { problem: Exercise; index: number }[]>()
+  problems.forEach((problem, index) => {
+    const topic = problem.skill?.trim() || 'Practice problem'
+    topics.set(topic, [...(topics.get(topic) ?? []), { problem, index }])
+  })
+
+  return (
+    <nav aria-label="Review by topic" className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-bold">Review by topic</h2>
+        <span className="text-xs font-medium text-slate-400">
+          {problems.length} {problems.length === 1 ? 'problem' : 'problems'} generated
+        </span>
+      </div>
+      <ul className="flex flex-col gap-2">
+        {[...topics.entries()].map(([topic, items]) => {
+          const isOpen = openTopics[topic] ?? false
+          const panelId = `topic-${topic.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+          const containsCurrent = items.some((item) => item.index === currentIndex)
+          return (
+            <li key={topic} className="overflow-hidden rounded-xl border border-slate-200">
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                aria-controls={panelId}
+                onClick={() => setOpenTopics((current) => ({ ...current, [topic]: !isOpen }))}
+                className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold transition hover:bg-slate-50 ${containsCurrent ? 'text-indigo-700' : 'text-slate-700'}`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <ChevronRight className={`size-4 shrink-0 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                  <span className="truncate">{topic}</span>
+                </span>
+                <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                  {items.length}
+                </span>
+              </button>
+              {isOpen && (
+                <ul id={panelId} className="flex flex-col gap-1 border-t border-slate-100 bg-slate-50/60 p-2">
+                  {items.map(({ problem, index }) => {
+                    const isCurrent = index === currentIndex
+                    return (
+                      <li key={`${index}-${problem.question}`}>
+                        <button
+                          type="button"
+                          onClick={() => onSelect(index)}
+                          aria-current={isCurrent ? 'step' : undefined}
+                          className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${isCurrent ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-white'}`}
+                        >
+                          <span
+                            className={`shrink-0 text-xs font-semibold ${isCurrent ? 'text-indigo-100' : 'text-slate-400'}`}
+                          >
+                            #{index + 1}
+                          </span>
+                          <span className="line-clamp-2">{problem.question}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </nav>
   )
 }
 
