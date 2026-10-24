@@ -266,6 +266,18 @@ export default function Page() {
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState('')
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [reviewHistory, setReviewHistory] = useState<Record<string, Exercise[]>>({})
+
+  const addToHistory = (exercises: Exercise[]) => {
+    const topic = analysis?.topic?.trim() || analysis?.subject || subject
+    setReviewHistory((current) => {
+      const existing = current[topic] ?? []
+      const seen = new Set(existing.map((item) => item.question))
+      const fresh = exercises.filter((item) => !seen.has(item.question))
+      if (fresh.length === 0) return current
+      return { ...current, [topic]: [...existing, ...fresh] }
+    })
+  }
 
   useEffect(() => {
     if (!preview) return
@@ -361,6 +373,7 @@ export default function Page() {
             error={error}
           />
         )}
+        {appState === 'idle' && <ReviewTopicsPanel history={reviewHistory} />}
         {appState === 'analyzing' && <LoadingState preview={preview} />}
         {appState === 'results' && (
           <ResultsState
@@ -375,6 +388,7 @@ export default function Page() {
             analysis={analysis}
             fallbackSubject={subject}
             onBack={() => setAppState('results')}
+            onGenerated={addToHistory}
           />
         )}
         {appState === 'exercises' && (
@@ -749,10 +763,12 @@ function PracticeState({
   analysis,
   fallbackSubject,
   onBack,
+  onGenerated,
 }: {
   analysis: Analysis | null
   fallbackSubject: string
   onBack: () => void
+  onGenerated: (exercises: Exercise[]) => void
 }) {
   const baseRequest = exerciseRequestFor(analysis, fallbackSubject)
   const avoidOriginal = baseRequest.originalTask ? [baseRequest.originalTask] : []
@@ -761,8 +777,10 @@ function PracticeState({
     error: firstBatchError,
     isLoading: firstBatchLoading,
     mutate: retryFirstBatch,
-  } = useSWRImmutable(['practice', baseRequest.originalTask ?? baseRequest.topic, baseRequest.weakness], () =>
-    fetchExercises({ ...baseRequest, difficulty: 'medium', count: PRACTICE_BATCH_SIZE, avoid: avoidOriginal }),
+  } = useSWRImmutable(
+    ['practice', baseRequest.originalTask ?? baseRequest.topic, baseRequest.weakness],
+    () => fetchExercises({ ...baseRequest, difficulty: 'medium', count: PRACTICE_BATCH_SIZE, avoid: avoidOriginal }),
+    { onSuccess: onGenerated },
   )
   const [extraProblems, setExtraProblems] = useState<Exercise[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
@@ -804,6 +822,7 @@ function PracticeState({
         avoid: [...avoidOriginal, ...problems.map((item) => item.question)],
       })
       setExtraProblems((current) => [...current, ...fresh])
+      onGenerated(fresh)
       goTo(index + 1)
     } catch (loadError) {
       setMoreError(loadError instanceof Error ? loadError.message : 'Unable to create a new problem.')
@@ -1019,6 +1038,101 @@ function TopicList({
           )
         })}
       </ul>
+    </nav>
+  )
+}
+
+function ReviewTopicsPanel({ history }: { history: Record<string, Exercise[]> }) {
+  const [openTopics, setOpenTopics] = useState<Record<string, boolean>>({})
+  const [openAnswers, setOpenAnswers] = useState<Record<string, boolean>>({})
+  const topics = Object.entries(history)
+  const total = topics.reduce((sum, [, items]) => sum + items.length, 0)
+
+  return (
+    <nav
+      aria-label="Review by topic"
+      className="mx-auto mt-10 max-w-3xl rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-sm sm:p-6"
+    >
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-bold">Review by topic</h2>
+          <p className="text-sm text-slate-500">Every practice problem you generated, grouped by topic.</p>
+        </div>
+        <span className="shrink-0 text-xs font-medium text-slate-400">
+          {total} {total === 1 ? 'problem' : 'problems'}
+        </span>
+      </div>
+      {topics.length === 0 ? (
+        <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+          No topics yet. Upload homework and use Practice Now — every problem you generate with Next problem will
+          appear here.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {topics.map(([topic, items]) => {
+            const isOpen = openTopics[topic] ?? false
+            const panelId = `review-${topic.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+            return (
+              <li key={topic} className="overflow-hidden rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  aria-controls={panelId}
+                  onClick={() => setOpenTopics((current) => ({ ...current, [topic]: !isOpen }))}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ChevronRight className={`size-4 shrink-0 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                    <span className="truncate">{topic}</span>
+                  </span>
+                  <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                    {items.length}
+                  </span>
+                </button>
+                {isOpen && (
+                  <ol id={panelId} className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/60 p-3">
+                    {items.map((problem, index) => {
+                      const answerKey = `${topic}-${index}`
+                      const showAnswer = openAnswers[answerKey] ?? false
+                      return (
+                        <li key={answerKey} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                          <div className="flex items-start gap-3">
+                            <span className="shrink-0 text-xs font-semibold text-slate-400">#{index + 1}</span>
+                            <div className="min-w-0 flex-1">
+                              {problem.skill && (
+                                <p className="mb-1 text-xs font-medium text-indigo-600">{problem.skill}</p>
+                              )}
+                              <p className="font-medium leading-6 text-slate-800">{problem.question}</p>
+                              <button
+                                type="button"
+                                aria-expanded={showAnswer}
+                                onClick={() => setOpenAnswers((current) => ({ ...current, [answerKey]: !showAnswer }))}
+                                className="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+                              >
+                                {showAnswer ? 'Hide answer' : 'Show answer'}
+                              </button>
+                              {showAnswer && (
+                                <p className="mt-2 rounded-lg bg-slate-50 p-3 text-slate-700">
+                                  <span className="font-semibold">Answer:</span> {problem.answer}
+                                  {problem.solution && (
+                                    <span className="mt-2 block whitespace-pre-line text-slate-600">
+                                      {problem.solution}
+                                    </span>
+                                  )}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </nav>
   )
 }
